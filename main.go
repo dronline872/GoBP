@@ -20,7 +20,7 @@ type TargetFile struct {
 	Name string
 }
 
-type FileList map[string]TargetFile
+type FileList []TargetFile
 
 type FileInfo interface {
 	os.FileInfo
@@ -37,24 +37,24 @@ func (fi fileInfo) Path() string {
 }
 
 //Ограничить глубину поиска заданым числом, по SIGUSR2 увеличить глубину поиска на +2
-func ListDirectory(ctx context.Context, dir string, sigChUsr chan os.Signal, depth int, wg sync.WaitGroup, files chan<- fileInfo) {
+func ListDirectory(ctx context.Context, dir string, sigChUsr chan os.Signal, depth int, wg *sync.WaitGroup, files chan<- fileInfo) {
 	defer wg.Done()
 
-	select {
-	case <-ctx.Done():
+	res, err := ioutil.ReadDir(dir)
+	if err != nil {
+		log.Printf("[ERROR] %v\n", err)
 		return
-	case <-sigChUsr:
-		fmt.Printf("Dir: %s  Depth:", dir)
-		return
-	default:
-		//По SIGUSR1 вывести текущую директорию и текущую глубину поиска
+	}
+
+	for _, entry := range res {
 		time.Sleep(time.Second * 10)
-		res, err := ioutil.ReadDir(dir)
-		if err != nil {
-			log.Printf("[ERROR] %v\n", err)
+		select {
+		case <-ctx.Done():
 			return
-		}
-		for _, entry := range res {
+		case <-sigChUsr:
+			fmt.Printf("Dir: %s  Depth:", dir)
+			return
+		default:
 			path := filepath.Join(dir, entry.Name())
 			if entry.IsDir() {
 				depth++
@@ -77,18 +77,21 @@ func FindFiles(ctx context.Context, ext string, sigChUsr chan os.Signal) (FileLi
 	files := make(chan fileInfo, 100)
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go ListDirectory(ctx, wd, sigChUsr, depth, wg, files)
-	wg.Wait()
-	fl := make(FileList, len(files))
+	go ListDirectory(ctx, wd, sigChUsr, depth, &wg, files)
+
+	go func() {
+		wg.Wait()
+		close(files)
+	}()
+
+	var ret FileList
 	for file := range files {
 		if filepath.Ext(file.Name()) == ext {
-			fl[file.Name()] = TargetFile{
-				Name: file.Name(),
-				Path: file.Path(),
-			}
+			ret = append(ret, TargetFile{Name: file.Name(), Path: file.Path()})
 		}
 	}
-	return fl, nil
+
+	return ret, nil
 }
 
 func main() {
@@ -109,6 +112,7 @@ func main() {
 			log.Printf("Error on search: %v\n", err)
 			os.Exit(1)
 		}
+
 		for _, f := range res {
 			fmt.Printf("\tName: %s\t\t Path: %s\n", f.Name, f.Path)
 		}

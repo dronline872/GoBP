@@ -6,13 +6,14 @@ import (
 	"context"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 type TargetFile struct {
@@ -37,12 +38,12 @@ func (fi fileInfo) Path() string {
 }
 
 //Ограничить глубину поиска заданым числом, по SIGUSR2 увеличить глубину поиска на +2
-func ListDirectory(ctx context.Context, dir string, sigChUsr chan os.Signal, depth int, wg *sync.WaitGroup, files chan<- fileInfo) {
+func ListDirectory(ctx context.Context, dir string, sigChUsr chan os.Signal, depth int, wg *sync.WaitGroup, files chan<- fileInfo, logger *zap.Logger) {
 	defer wg.Done()
 
 	res, err := ioutil.ReadDir(dir)
 	if err != nil {
-		log.Printf("[ERROR] %v\n", err)
+		logger.Error(fmt.Sprintf("Error on ReadDir: %v\n", err))
 		return
 	}
 
@@ -52,14 +53,17 @@ func ListDirectory(ctx context.Context, dir string, sigChUsr chan os.Signal, dep
 		case <-ctx.Done():
 			return
 		case <-sigChUsr:
-			fmt.Printf("Dir: %s  Depth:", dir)
+			logger.Info("Current directory:",
+				zap.String("Dir", dir),
+				zap.Int("Depth", depth),
+			)
 			return
 		default:
 			path := filepath.Join(dir, entry.Name())
 			if entry.IsDir() {
 				depth++
 				wg.Add(1)
-				go ListDirectory(ctx, path, sigChUsr, depth, wg, files) //Дополнительно: вынести в горутину
+				go ListDirectory(ctx, path, sigChUsr, depth, wg, files, logger) //Дополнительно: вынести в горутину
 			} else {
 				files <- fileInfo{entry, path}
 			}
@@ -67,7 +71,7 @@ func ListDirectory(ctx context.Context, dir string, sigChUsr chan os.Signal, dep
 	}
 }
 
-func FindFiles(ctx context.Context, ext string, sigChUsr chan os.Signal) (FileList, error) {
+func FindFiles(ctx context.Context, ext string, sigChUsr chan os.Signal, logger *zap.Logger) (FileList, error) {
 	wd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -77,7 +81,7 @@ func FindFiles(ctx context.Context, ext string, sigChUsr chan os.Signal) (FileLi
 	files := make(chan fileInfo, 100)
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go ListDirectory(ctx, wd, sigChUsr, depth, &wg, files)
+	go ListDirectory(ctx, wd, sigChUsr, depth, &wg, files, logger)
 
 	go func() {
 		wg.Wait()
@@ -95,6 +99,7 @@ func FindFiles(ctx context.Context, ext string, sigChUsr chan os.Signal) (FileLi
 }
 
 func main() {
+	logger, _ := zap.NewProduction()
 	const wantExt = ".go"
 	ctx := context.Background()
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -107,23 +112,26 @@ func main() {
 
 	waitCh := make(chan struct{})
 	go func() {
-		res, err := FindFiles(ctx, wantExt, sigChUsr)
+		res, err := FindFiles(ctx, wantExt, sigChUsr, logger)
 		if err != nil {
-			log.Printf("Error on search: %v\n", err)
+			logger.Error(fmt.Sprintf("Error on search: %v\n", err))
 			os.Exit(1)
 		}
 
 		for _, f := range res {
-			fmt.Printf("\tName: %s\t\t Path: %s\n", f.Name, f.Path)
+			logger.Info("Result:",
+				zap.String("Name", f.Name),
+				zap.String("Path", f.Path),
+			)
 		}
 		waitCh <- struct{}{}
 	}()
 	go func() {
 		<-sigCh
-		log.Println("Signal received, terminate...")
+		logger.Warn("Signal received, terminate...")
 		cancel()
 	}()
 	//Дополнительно: Ожидание всех горутин перед завершением
 	<-waitCh
-	log.Println("Done")
+	logger.Info("Done")
 }

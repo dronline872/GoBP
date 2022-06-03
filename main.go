@@ -40,7 +40,6 @@ func (fi fileInfo) Path() string {
 //Ограничить глубину поиска заданым числом, по SIGUSR2 увеличить глубину поиска на +2
 func ListDirectory(ctx context.Context, dir string, sigChUsr chan os.Signal, depth int, wg *sync.WaitGroup, files chan<- fileInfo, logger *zap.Logger) {
 	defer wg.Done()
-
 	res, err := ioutil.ReadDir(dir)
 	if err != nil {
 		logger.Error(fmt.Sprintf("Error on ReadDir: %v\n", err))
@@ -48,7 +47,6 @@ func ListDirectory(ctx context.Context, dir string, sigChUsr chan os.Signal, dep
 	}
 
 	for _, entry := range res {
-		time.Sleep(time.Second * 10)
 		select {
 		case <-ctx.Done():
 			return

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -25,7 +26,11 @@ func TestPath(t *testing.T) {
 func TestListDirectory(t *testing.T) {
 	ctx := context.Background()
 	ctx, _ = context.WithTimeout(ctx, 30*time.Second)
-	dir := "./dir"
+	dir, _ := os.Getwd()
+	for !strings.HasSuffix(dir, "GoBP") {
+		dir = filepath.Dir(dir)
+	}
+
 	sigChUsr := make(chan os.Signal, 1)
 	signal.Notify(sigChUsr, syscall.SIGUSR1)
 	depth := 1
@@ -42,7 +47,7 @@ func TestListDirectory(t *testing.T) {
 
 	var resultFileList FileList
 	resultFileList = append(resultFileList, TargetFile{
-		Path: "dir/dir2/dir3/file.txt",
+		Path: dir + "/dir/dir2/dir3/file.txt",
 		Name: "file.txt",
 	})
 

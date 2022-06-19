@@ -6,15 +6,15 @@ run:
   linters:
   disable-all: true
   enable:
-    - govet 
-    - goconst 
-    - funlen 
-    - bodyclose 
-    - errcheck 
-    - deadcode 
+    - govet
+    - goconst
+    - funlen
+    - bodyclose
+    - errcheck
+    - deadcode
     - exportloopref
     - gocyclo
-    - goreporter 
+    - goreporter
   linters-settings:
   govet:
     check-shadowing: true
